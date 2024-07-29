@@ -454,7 +454,9 @@ class DetectMultiBackend(nn.Module):
         from models.experimental import attempt_download, attempt_load  # scoped to avoid circular import
 
         super().__init__()
+        # 权重可以有多个，即一个列表，默认是一个权重
         w = str(weights[0] if isinstance(weights, list) else weights)
+        # 根据权重文件格式
         pt, jit, onnx, xml, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle, triton = self._model_type(w)
         fp16 &= pt or jit or onnx or engine or triton  # FP16
         nhwc = coreml or saved_model or pb or tflite or edgetpu  # BHWC formats (vs torch BCWH)
@@ -463,6 +465,7 @@ class DetectMultiBackend(nn.Module):
         if not (pt or triton):
             w = attempt_download(w)  # download if not local
 
+        # 通过上述结果，使用不同框架加载权重文件
         if pt:  # PyTorch
             model = attempt_load(weights if isinstance(weights, list) else w, device=device, inplace=True, fuse=fuse)
             stride = max(int(model.stride.max()), 32)  # model stride
