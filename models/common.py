@@ -454,23 +454,30 @@ class DetectMultiBackend(nn.Module):
         from models.experimental import attempt_download, attempt_load  # scoped to avoid circular import
 
         super().__init__()
-        # 权重可以有多个，即一个列表，默认是一个权重
+        # 权重可以是一个列表，取第一个作为权重，如果不是列表默认是权重weights="yolov5s.pt"
         w = str(weights[0] if isinstance(weights, list) else weights)
-        # 根据权重文件格式
+        # 根据权重文件格式，获取后端框架
         pt, jit, onnx, xml, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle, triton = self._model_type(w)
         fp16 &= pt or jit or onnx or engine or triton  # FP16
         nhwc = coreml or saved_model or pb or tflite or edgetpu  # BHWC formats (vs torch BCWH)
+        # 模型步距
         stride = 32  # default stride
         cuda = torch.cuda.is_available() and device.type != "cpu"  # use CUDA
+        # 下载权重文件
         if not (pt or triton):
             w = attempt_download(w)  # download if not local
 
         # 通过上述结果，使用不同框架加载权重文件
         if pt:  # PyTorch
+            # 加载模型
             model = attempt_load(weights if isinstance(weights, list) else w, device=device, inplace=True, fuse=fuse)
+            # 获取权重文件的步长，与默认步长比较，取最大值
             stride = max(int(model.stride.max()), 32)  # model stride
+            # 获取权重文件中的类别名
             names = model.module.names if hasattr(model, "module") else model.names  # get class names
+            # 是否为半精度计算
             model.half() if fp16 else model.float()
+            # 初始化模型成功
             self.model = model  # explicitly assign for to(), cpu(), cuda(), half()
         elif jit:  # TorchScript
             LOGGER.info(f"Loading {w} for TorchScript inference...")
@@ -650,6 +657,7 @@ class DetectMultiBackend(nn.Module):
             raise NotImplementedError(f"ERROR: {w} is not a supported format")
 
         # class names
+        # 加载检测类别名，data为none则默认创建999个class
         if "names" not in locals():
             names = yaml_load(data)["names"] if data else {i: f"class{i}" for i in range(999)}
         if names[0] == "n01440764" and len(names) == 1000:  # ImageNet
@@ -762,7 +770,9 @@ class DetectMultiBackend(nn.Module):
         from export import export_formats
         from utils.downloads import is_url
 
+        # 获取列表元素的后缀名
         sf = list(export_formats().Suffix)  # export suffixes
+        # 检查是否为url连接，如果不是则检查后缀名
         if not is_url(p, check=False):
             check_suffix(p, sf)  # checks
         url = urlparse(p)  # if url may be Triton inference server

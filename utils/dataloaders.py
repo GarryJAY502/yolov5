@@ -320,30 +320,37 @@ class LoadImages:
 
     def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
         """Initializes YOLOv5 loader for images/videos, supporting glob patterns, directories, and lists of paths."""
+        # 判断path是否为str类型且以txt文件保存的路径
         if isinstance(path, str) and Path(path).suffix == ".txt":  # *.txt file with img/vid/dir on each line
+            # 以空白字符分割路径，返回地址列表
             path = Path(path).read_text().rsplit()
         files = []
+        # 对路径排序遍历
         for p in sorted(path) if isinstance(path, (list, tuple)) else [path]:
+            # 由相对路径得到绝对路径
             p = str(Path(p).resolve())
             if "*" in p:
+                # 判断是否带‘*’，glob函数返回与路径模式匹配的路径列表
                 files.extend(sorted(glob.glob(p, recursive=True)))  # glob
             elif os.path.isdir(p):
+                # 判断是否是一个文件夹
                 files.extend(sorted(glob.glob(os.path.join(p, "*.*"))))  # dir
             elif os.path.isfile(p):
+                # 判断是不是一个文件
                 files.append(p)  # files
             else:
                 raise FileNotFoundError(f"{p} does not exist")
-
+        # 以‘.’进行分割，得到文件后缀名，判断是否在规定的格式中
         images = [x for x in files if x.split(".")[-1].lower() in IMG_FORMATS]
         videos = [x for x in files if x.split(".")[-1].lower() in VID_FORMATS]
         ni, nv = len(images), len(videos)
 
         self.img_size = img_size
         self.stride = stride
-        self.files = images + videos
+        self.files = images + videos    # [FilePath1, FilePath2, ...]
         self.nf = ni + nv  # number of files
-        self.video_flag = [False] * ni + [True] * nv
-        self.mode = "image"
+        self.video_flag = [False] * ni + [True] * nv    # [False, False, ... , True, Ture...]
+        self.mode = "image" # 标记预测的是一个图片
         self.auto = auto
         self.transforms = transforms  # optional
         self.vid_stride = vid_stride  # video frame-rate stride
@@ -356,17 +363,22 @@ class LoadImages:
             f"Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
         )
 
+    # python迭代器，必须有__iter__()方法和__next__()方法
     def __iter__(self):
         """Initializes iterator by resetting count and returns the iterator object itself."""
         self.count = 0
         return self
 
+    # for loop迭代一次就调用一次next方法
     def __next__(self):
         """Advances to the next file in the dataset, raising StopIteration if at the end."""
+        # 每次循环，查看count值与文件数值，当相同则表示到达最后一个值
         if self.count == self.nf:
             raise StopIteration
+        # 预测的第一个文件路径
         path = self.files[self.count]
 
+        # 视频标记列表，这段代码对vide_flag[self.count] == True的文件进行处理
         if self.video_flag[self.count]:
             # Read video
             self.mode = "video"
@@ -386,18 +398,22 @@ class LoadImages:
             # im0 = self._cv2_rotate(im0)  # for use if cv2 autorotation is False
             s = f"video {self.count + 1}/{self.nf} ({self.frame}/{self.frames}) {path}: "
 
+        # 不是video则用image方式读取
         else:
             # Read image
             self.count += 1
             im0 = cv2.imread(path)  # BGR
             assert im0 is not None, f"Image Not Found {path}"
+            # 输出打印信息
             s = f"image {self.count}/{self.nf} {path}: "
 
+        # pytorch的图像预处理模块
         if self.transforms:
             im = self.transforms(im0)  # transforms
         else:
+            # 填充调整大小
             im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
-            im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+            im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW with using transpose((2,0,1)), BGR to RGB with using [::-1}
             im = np.ascontiguousarray(im)  # contiguous
 
         return path, im, im0, self.cap, s
@@ -511,6 +527,7 @@ class LoadStreams:
         if self.transforms:
             im = np.stack([self.transforms(x) for x in im0])  # transforms
         else:
+            # auto：是否自动调整填充以使图像的宽度和高度为步长（stride）的倍数。
             im = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
             im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
             im = np.ascontiguousarray(im)  # contiguous

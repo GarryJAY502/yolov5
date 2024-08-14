@@ -177,18 +177,19 @@ def run(
     # 加载模型权重
     # Load model
 
-    # 选择设备
+    # 选择设备,GPU or CPu
     device = select_device(device)
     # 选择模型的后端框架
     # 参数（模型权重，运行设备，/，/，半精度推理）
     model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
     # 加载模型的参数：步长，类别名，是否为.pt文件，即pytorch模型
     stride, names, pt = model.stride, model.names, model.pt
-    # 检查图片尺寸，模型步长
+    # 检查图片尺寸，模型步长，检查是否满足倍数关系，可以被整除，输入图片是stride的倍数
     imgsz = check_img_size(imgsz, s=stride)  # check image size
 
     # 加载待预测的图片
     # Dataloader
+    # 批数大小，此处表示每次输入一张图片
     bs = 1  # batch_size
     if webcam:
         view_img = check_imshow(warn=True)
@@ -197,31 +198,53 @@ def run(
     elif screenshot:
         dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
     else:
+        # 加载图片文件
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+    # 列表初始化，元素数量是bs个
     vid_path, vid_writer = [None] * bs, [None] * bs
 
     # 模型推理
     # Run inference
+    # 模型预热：由于刚开始训练时,模型的权重(weights)是随机初始化的，此时若选择一个较大的学习率,可能带来模型的不稳定(振荡)，
+    # 选择Warmup预热学习率的方式，可以使得开始训练的几个epoches或者一些steps内学习率较小,
+    # 在预热的小学习率下，模型可以慢慢趋于稳定,等模型相对稳定后再选择预先设置的学习率进行训练,使得模型收敛速度变得更快，模型效果更佳
+    # *imgsz解包操作
+    # x = [1, 2, 3, 4, 5]
+    # print(x) # [1, 2, 3, 4, 5]
+    # print(*x) # 1 2 3 4 5
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
+    # Profile是性能分析工具类,用于计时
     seen, windows, dt = 0, [], (Profile(device=device), Profile(device=device), Profile(device=device))
-    for path, im, im0s, vid_cap, s in dataset:
-        with dt[0]:
-            im = torch.from_numpy(im).to(model.device)
+    for path, im, im0s, vid_cap, s in dataset:  # def __next__ :return path, im, im0, self.cap, s
+        with dt[0]:  # 计时工具
+            im = torch.from_numpy(im).to(model.device)  # 图片是numpy格式的数组，转换成pytorch支持的tensor格式，放到device中
             im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
-            im /= 255  # 0 - 255 to 0.0 - 1.0
+            im /= 255  # 0 - 255 to 0.0 - 1.0   归一化
+            # 判断维度是否为3，添加batch维度
             if len(im.shape) == 3:
+                # import torch
+                #
+                # a = torch.tensor([1, 2, 3, 4, 5])
+                # print(a, a.shape)    # tensor([1, 2, 3, 4, 5]) torch.Size([5])
+                # a = a[None]     # tensor([1, 2, 3, 4, 5]) torch.Size([5])
+                # print(a, a.shape)
                 im = im[None]  # expand for batch dim
             if model.xml and im.shape[0] > 1:
                 ims = torch.chunk(im, im.shape[0], 0)
 
         # Inference
         with dt[1]:
+            # 推理阶段保存中间特征图，可用于特征图可视化等
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
             if model.xml and im.shape[0] > 1:
                 pred = None
                 for image in ims:
                     if pred is None:
-                        pred = model(image, augment=augment, visualize=visualize).unsqueeze(0)
+                        # augment数据增强，在推理阶段使用数据增强，从推理一张图片变成推理三张图片
+                        # 可能对推断结果有帮助，但也会降低模型的运行速度
+                        # torch.Size([1, 18900, 85]）
+                        pred = model(image, augment=augment, visualize=visualize).unsqueeze(0)  # 得到模型预测出的所有的检测框
+
                     else:
                         pred = torch.cat((pred, model(image, augment=augment, visualize=visualize).unsqueeze(0)), dim=0)
                 pred = [pred, None]
@@ -229,7 +252,9 @@ def run(
                 pred = model(im, augment=augment, visualize=visualize)
         # NMS
         with dt[2]:
+            # torch.Size([1, 5, 6】)
             pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+
 
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
@@ -248,8 +273,9 @@ def run(
                 writer.writerow(data)
 
         # Process predictions
+        # 遍历一个batch的所有图片
         for i, det in enumerate(pred):  # per image
-            seen += 1
+            seen += 1   # 计数
             if webcam:  # batch_size >= 1
                 p, im0, frame = path[i], im0s[i].copy(), dataset.count
                 s += f"{i}: "
@@ -261,10 +287,11 @@ def run(
             txt_path = str(save_dir / "labels" / p.stem) + ("" if dataset.mode == "image" else f"_{frame}")  # im.txt
             s += "%gx%g " % im.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            imc = im0.copy() if save_crop else im0  # for save_crop
-            annotator = Annotator(im0, line_width=line_thickness, example=str(names))
+            imc = im0.copy() if save_crop else im0  # for save_crop  是否裁剪检测目标图片区域保存
+            annotator = Annotator(im0, line_width=line_thickness, example=str(names))  # 绘图工具
             if len(det):
                 # Rescale boxes from img_size to im0 size
+                # 坐标映射，将预测出的框绘制在原图上
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
 
                 # Print results

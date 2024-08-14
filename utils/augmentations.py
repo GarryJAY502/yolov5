@@ -119,21 +119,40 @@ def replicate(im, labels):
 
 
 def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
-    """Resizes and pads image to new_shape with stride-multiple constraints, returns resized image, ratio, padding."""
+    """Resizes and pads image to new_shape with stride-multiple constraints, returns resized image, ratio, padding.
+    用于将输入的图像进行长边resize和填充，以满足一定的约束条件。函数的输入参数包括：
+
+    im：输入的图像，可以是任意尺寸和通道数的numpy数组。
+    new_shape：目标尺寸，可以是一个整数或一个元组。如果是一个整数，则表示将图像resize成一个正方形；如果是一个元组，则表示将图像resize成指定的宽度和高度。
+    color：填充颜色，可以是一个整数或一个元组。如果是一个整数，则表示使用灰度值为该整数的像素进行填充；如果是一个元组，则表示使用RGB颜色值进行填充。
+    auto：是否启用自动计算填充大小。如果为True，则会根据指定的stride值计算最小的填充大小，以满足长宽比和stride倍数的约束条件；如果为False，则会根据指定的scaleFill和scaleup参数计算填充大小。
+    scaleFill：是否启用拉伸填充。如果为True，则会拉伸图像以填满目标尺寸；如果为False，则会根据指定的scaleup参数决定是否缩放图像。
+    scaleup：是否允许放大图像。如果为True，则允许将输入图像放大到目标尺寸；如果为False，则只能将输入图像缩小到目标尺寸。
+    stride：stride值，用于计算最小填充大小。
+
+    """
+    # 获取输入图片的宽和高
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
 
     # Scale ratio (new / old)
+    # 计算缩放比例，尺度变换
+    # e.g.  640/1080 ,640/810 (for img of bus.jpg), chose the minimal one
+    # 按照图片的长边的比例作为缩放系数
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
     if not scaleup:  # only scale down, do not scale up (for better val mAP)
         r = min(r, 1.0)
 
     # Compute padding
     ratio = r, r  # width, height ratios
-    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))  # shape 反转[width ,height]
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+    # yolov5最终下采样最大倍数是32倍，原始图像要保证是32的倍数，高层的feature map相对与原始图片有32倍比例系数
     if auto:  # minimum rectangle
+        # mod函数用于计算模数，也就是取余
+        # 例如dw：480为stride：32的倍数，mod结果为0，即padding操作0，直接填充到48即可
+        # 478不是stride：32的倍数，mod结果为30，即padding操作30
         dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
     elif scaleFill:  # stretch
         dw, dh = 0.0, 0.0
@@ -143,8 +162,9 @@ def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleF
     dw /= 2  # divide padding into 2 sides
     dh /= 2
 
-    if shape[::-1] != new_unpad:  # resize
+    if shape[::-1] != new_unpad:  # resize 再一次反转[height, width]
         im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
+    # padding操作
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
