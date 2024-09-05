@@ -300,8 +300,7 @@ class DetectionModel(BaseModel):
 
     def _clip_augmented(self, y):
         """Clips augmented inference tails for YOLOv5 models, affecting first and last tensors based on grid points and
-        layer counts.
-        """
+        layer counts.        """
         nl = self.model[-1].nl  # number of detection layers (P3-P5)
         g = sum(4**x for x in range(nl))  # grid points
         e = 1  # exclude layer count

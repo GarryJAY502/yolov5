@@ -632,12 +632,14 @@ def main(opt, callbacks=Callbacks()):
         For detailed usage, refer to:
         https://github.com/ultralytics/yolov5/tree/master/models
     """
+    # RANK不进行分布式训练时默认是-1
     if RANK in {-1, 0}:
-        print_args(vars(opt))
-        check_git_status()
-        check_requirements(ROOT / "requirements.txt")
+        print_args(vars(opt))   # 打印文件参数信息
+        check_git_status()  # 检查yolov5仓库是否更新
+        check_requirements(ROOT / "requirements.txt") # 检查依赖包是否安装成功
 
     # Resume (from specified or most recent last.pt)
+    # 从中断训练中恢复·
     if opt.resume and not check_comet_resume(opt) and not opt.evolve:
         last = Path(check_file(opt.resume) if isinstance(opt.resume, str) else get_latest_run())
         opt_yaml = last.parent.parent / "opt.yaml"  # train options yaml
@@ -668,7 +670,7 @@ def main(opt, callbacks=Callbacks()):
             opt.name = Path(opt.cfg).stem  # use model.yaml as name
         opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))
 
-    # DDP mode
+    # DDP(Distributed Data Parallel) mode
     device = select_device(opt.device, batch_size=opt.batch_size)
     if LOCAL_RANK != -1:
         msg = "is not compatible with YOLOv5 Multi-GPU DDP training"
